@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $widget = Join-Path $PSScriptRoot 'CodexStatusWidget.ps1'
 $root = Join-Path $env:TEMP ('codex-widget-tests-' + [guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $root)
@@ -65,6 +65,53 @@ try {
         (Event (Ts 12) 'event_msg' ([ordered]@{type='task_complete';turn_id=$t2}))
     ) | Out-Null
     Assert-State 'action' 'plan review'
+
+    Remove-Item (Join-Path $root '*.jsonl')
+    $t2tag='turn-tag-explanation'
+    Write-EventFile '02-tag-explanation' @(
+        (Event (Ts 12) 'turn_context' ([ordered]@{turn_id=$t2tag})),
+        (Message $t2tag 'assistant' 'final_answer' 'The literal <proposed_plan> tag is used for review requests.' (Ts 13)),
+        (Event (Ts 14) 'event_msg' ([ordered]@{type='task_complete';turn_id=$t2tag}))
+    ) | Out-Null
+    Assert-State 'idle' 'literal proposal tag mention does not request review'
+
+    Remove-Item (Join-Path $root '*.jsonl')
+    $t2b='turn-plan-question'
+    Write-EventFile '02b-plan-question' @(
+        (Event (Ts 13) 'turn_context' ([ordered]@{turn_id=$t2b;collaboration_mode=[ordered]@{mode='plan'}})),
+        (Message $t2b 'assistant' 'final_answer' 'Please choose how I should modify it.' (Ts 14)),
+        (Event (Ts 15) 'event_msg' ([ordered]@{type='task_complete';turn_id=$t2b}))
+    ) | Out-Null
+    Assert-State 'action' 'plan mode final waits for user'
+
+    Remove-Item (Join-Path $root '*.jsonl')
+    $t2d='turn-plan-ordinary'
+    Write-EventFile '02d-plan-ordinary' @(
+        (Event (Ts 16) 'turn_context' ([ordered]@{turn_id=$t2d;collaboration_mode=[ordered]@{mode='plan'}})),
+        (Message $t2d 'assistant' 'final_answer' 'I inspected the repo and found no blocking issue.' (Ts 17)),
+        (Event (Ts 18) 'event_msg' ([ordered]@{type='task_complete';turn_id=$t2d}))
+    ) | Out-Null
+    Assert-State 'idle' 'plan mode ordinary final does not request review'
+
+    Remove-Item (Join-Path $root '*.jsonl')
+    $t2e='turn-plan-mentions-plan'
+    Write-EventFile '02e-plan-mentions-plan' @(
+        (Event (Ts 19) 'turn_context' ([ordered]@{turn_id=$t2e;collaboration_mode=[ordered]@{mode='plan'}})),
+        (Message $t2e 'assistant' 'final_answer' 'The plan explains the implementation and its tradeoffs.' (Ts 20)),
+        (Event (Ts 21) 'event_msg' ([ordered]@{type='task_complete';turn_id=$t2e}))
+    ) | Out-Null
+    Assert-State 'idle' 'plan mode mentioning plan does not request review'
+
+    Remove-Item (Join-Path $root '*.jsonl')
+    $t2c='turn-plan-input'
+    Write-EventFile '02c-plan-input' @(
+        (Event (Ts 16) 'turn_context' ([ordered]@{turn_id=$t2c;collaboration_mode=[ordered]@{mode='plan'}})),
+        (Event (Ts 17) 'response_item' ([ordered]@{
+            type='function_call';name='request_user_input';call_id='input-1';arguments='{}'
+            internal_chat_message_metadata_passthrough=[ordered]@{turn_id=$t2c}
+        }))
+    ) | Out-Null
+    Assert-State 'action' 'plan mode function input request'
 
     Remove-Item (Join-Path $root '*.jsonl')
     $t3='turn-running'

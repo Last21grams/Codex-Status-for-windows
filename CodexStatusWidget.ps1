@@ -1,6 +1,15 @@
 param([switch]$Probe, [string]$SessionsRoot)
 
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class CodexWidgetMemory {
+    [DllImport("psapi.dll")]
+    public static extern bool EmptyWorkingSet(IntPtr process);
+}
+'@
 
 # Keep exactly one widget instance. This also prevents an old shortcut launch
 # from leaving several differently-colored widgets stacked on the desktop.
@@ -94,8 +103,11 @@ function Format-ResetExpiry([object]$value) {
 
 function Set-Lamps([object[]]$states) {
     $colors = @{ idle='#FFF4D6'; running='#F05252'; action='#4BA3FF'; offline='#77808D' }
-    $lampsPanel.Children.Clear()
     if (!$states -or $states.Count -eq 0) { $states = @('idle') }
+    $signature = @($states | ForEach-Object { [string]$_ }) -join '|'
+    if ($signature -eq $script:lastLampSignature) { return }
+    $script:lastLampSignature = $signature
+    $lampsPanel.Children.Clear()
     $dotSize = [Math]::Min(12.0, [Math]::Max(3.0, (24.0 / [Math]::Max(1, $states.Count)) - 1.0))
     foreach ($state in $states) {
         $color = if ($colors.ContainsKey([string]$state)) { $colors[[string]$state] } else { $colors.offline }
@@ -122,20 +134,26 @@ function Get-RecentSessionFiles {
         Sort-Object LastWriteTime -Descending | Select-Object -First 12)
 }
 
-function Get-ReviewReason([string]$text) {
+function Get-ReviewReason([string]$text, [bool]$isPlanMode = $false) {
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
-    if ($text -match '<proposed_plan>') { return 'plan_review' }
+    # Match an actual proposal block, not an explanatory sentence that merely
+    # mentions the literal tag name.
+    if ($text -match '(?s)<proposed_plan>.+?</proposed_plan>') { return 'plan_review' }
     $tail = $text.Trim()
     if ($tail.Length -gt 320) { $tail = $tail.Substring($tail.Length - 320) }
     if ($tail -match '[?\uFF1F]\s*$') { return 'explicit_question' }
-    if ($tail -match '\u8BF7\u9009\u62E9|\u8BF7\u786E\u8BA4|\u662F\u5426\u5141\u8BB8') { return 'explicit_choice' }
+    # A word such as “方案”, “选择”, or “计划” in an ordinary answer is not a
+    # request for the user to act.  Only recognise an imperative, a direct
+    # yes/no prompt, or an explicit wait-for-confirmation phrase.
+    if ($tail -match '\u8BF7\s*(\u9009\u62E9|\u786E\u8BA4|\u544A\u8BC9\u6211|\u56DE\u590D)|\u662F\u5426\s*(\u540C\u610F|\u5141\u8BB8|\u7EE7\u7EED|\u786E\u8BA4)|\u7B49\u5F85.*\u786E\u8BA4|\u5F85.*\u786E\u8BA4|\u9700\u8981\u60A8.*\u786E\u8BA4|\u8BF7\u6307\u793A|\u8BF7\u51B3\u5B9A|\u8BF7\u9009\u5B9A|\b(please\s+)?(choose|confirm|approve|proceed)\b|\bwhich\s+(option|approach)\b') { return 'explicit_choice' }
+    if ($isPlanMode -and $tail -match '(\u5982\u4F55|\u600E\u4E48).{0,12}\u4FEE\u6539|\u4FEE\u6539.{0,12}(\u5982\u4F55|\u600E\u4E48)|\u65B9\u6848.{0,16}(\u8BF7\u786E\u8BA4|\u5F85\u786E\u8BA4|\u7B49\u5F85|\u662F\u5426)|\u8BA1\u5212.{0,16}(\u8BF7\u786E\u8BA4|\u5F85\u786E\u8BA4|\u7B49\u5F85|\u662F\u5426)|how\s+.*modify|choose\s+how|plan\s+.*(confirm|wait)') { return 'plan_mode_waiting' }
     return $null
 }
 
 function New-TurnState([string]$turnId, [datetime]$when) {
     return @{
         TurnId=$turnId; Status='running'; Updated=$when; LastEvent='turn_started'
-        NeedsReview=$false; ReviewReason=$null; Pending=@{}; ActiveTools=@{}; FinalText=''
+        NeedsReview=$false; ReviewReason=$null; Pending=@{}; ActiveTools=@{}; FinalText=''; IsPlanMode=$false
     }
 }
 
@@ -167,11 +185,22 @@ function Start-LogStateProbe {
     }
 }
 
+function Stop-LogStateProbe {
+    if (!$script:logProbe) { return }
+    try { if (!$script:logProbe.HasExited) { $script:logProbe.Kill() } } catch {}
+    try { $script:logProbe.Dispose() } catch {}
+    $script:logProbe = $null
+}
+
 function Get-LogCompletionMap([object[]]$sessions) {
     $result = @{}
-    $turns = @($sessions | Where-Object { $_.Status -eq 'running' -and $_.ThreadId -and $_.TurnId } |
+    $turns = @($sessions | Where-Object { ($_.Status -eq 'running' -or $_.IsPlanMode) -and $_.ThreadId -and $_.TurnId } |
         ForEach-Object { @{ threadId=$_.ThreadId; turnId=$_.TurnId } })
-    if ($turns.Count -eq 0 -or !(Start-LogStateProbe)) { return $result }
+    if ($turns.Count -eq 0) {
+        Stop-LogStateProbe
+        return $result
+    }
+    if (!(Start-LogStateProbe)) { return $result }
     try {
         $request = @{ turns=$turns } | ConvertTo-Json -Depth 4 -Compress
         $script:logProbe.StandardInput.WriteLine($request)
@@ -183,8 +212,7 @@ function Get-LogCompletionMap([object[]]$sessions) {
             $result[$property.Name] = $property.Value
         }
     } catch {
-        try { if ($script:logProbe -and !$script:logProbe.HasExited) { $script:logProbe.Kill() } } catch {}
-        $script:logProbe = $null
+        Stop-LogStateProbe
     }
     return $result
 }
@@ -283,6 +311,7 @@ function Get-CodexSnapshot {
         $currentTurnId = $null
         $threadId = $null
         $isTopLevelConversation = $true
+        $isPlanMode = $false
         try {
             $meta = Get-Content -LiteralPath $file.FullName -TotalCount 1 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
             $threadId = [string]$(if ($meta.payload.id) { $meta.payload.id } else { $meta.payload.session_id })
@@ -293,11 +322,32 @@ function Get-CodexSnapshot {
                 $isTopLevelConversation = $false
             }
         } catch {}
-        $lines = @(Get-Content -LiteralPath $file.FullName -Tail 1200 -ErrorAction SilentlyContinue)
+        try {
+            foreach ($headLine in @(Get-Content -LiteralPath $file.FullName -TotalCount 80 -ErrorAction Stop)) {
+                try { $headItem = $headLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+                if ($headItem.type -eq 'event_msg' -and $headItem.payload.type -eq 'thread_settings_applied' -and $headItem.payload.thread_settings.collaboration_mode.mode) {
+                    $isPlanMode = ([string]$headItem.payload.thread_settings.collaboration_mode.mode -eq 'plan')
+                }
+                if ($headItem.type -eq 'turn_context' -and $headItem.payload.collaboration_mode.mode) {
+                    $isPlanMode = ([string]$headItem.payload.collaboration_mode.mode -eq 'plan')
+                }
+            }
+        } catch {}
+        # Recent structured events are sufficient to reconstruct the latest
+        # turn. Keeping a smaller tail substantially reduces transient string
+        # allocations when several long conversations exist.
+        $lines = @(Get-Content -LiteralPath $file.FullName -Tail 600 -ErrorAction SilentlyContinue)
 
         foreach ($line in $lines) {
             try { $item = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
             try { $when = [datetime]::Parse($item.timestamp).ToLocalTime() } catch { $when = $file.LastWriteTime }
+
+            if ($item.type -eq 'event_msg' -and $item.payload.type -eq 'thread_settings_applied' -and $item.payload.thread_settings.collaboration_mode.mode) {
+                $isPlanMode = ([string]$item.payload.thread_settings.collaboration_mode.mode -eq 'plan')
+            }
+            if ($item.type -eq 'turn_context' -and $item.payload.collaboration_mode.mode) {
+                $isPlanMode = ([string]$item.payload.collaboration_mode.mode -eq 'plan')
+            }
 
             if ($item.type -eq 'event_msg' -and $item.payload.type -eq 'token_count' -and $item.payload.rate_limits) {
                 if (!$latestRate -or $when -gt $latestRate.When) { $latestRate = @{ When=$when; Data=$item.payload.rate_limits } }
@@ -317,12 +367,14 @@ function Get-CodexSnapshot {
                 foreach ($old in $turns.Values) { $old.NeedsReview=$false; $old.ReviewReason=$null }
                 if (!$turns.ContainsKey($eventTurnId)) { $turns[$eventTurnId] = New-TurnState $eventTurnId $when }
                 $turns[$eventTurnId].Status='running'; $turns[$eventTurnId].Updated=$when; $turns[$eventTurnId].LastEvent='task_started'
+                $turns[$eventTurnId].IsPlanMode=$isPlanMode
                 continue
             }
 
             if (!$eventTurnId) { continue }
             if (!$turns.ContainsKey($eventTurnId)) { $turns[$eventTurnId] = New-TurnState $eventTurnId $when }
             $turn = $turns[$eventTurnId]
+            $turn.IsPlanMode = $isPlanMode
 
             if ($item.type -eq 'response_item' -and $item.payload.type -eq 'message' -and $item.payload.role -eq 'user') {
                 foreach ($old in $turns.Values) { $old.NeedsReview=$false; $old.ReviewReason=$null }
@@ -334,13 +386,13 @@ function Get-CodexSnapshot {
                 $item.payload.role -eq 'assistant' -and $item.payload.phase -in @('final','final_answer')) {
                 $text = (($item.payload.content | ForEach-Object { [string]$_.text }) -join '')
                 $turn.FinalText = $text
-                $reason = Get-ReviewReason $text
+                $reason = Get-ReviewReason $text ([bool]$turn.IsPlanMode)
                 if ($reason) { $turn.NeedsReview=$true; $turn.ReviewReason=$reason }
                 $turn.LastEvent='final_answer'; $turn.Updated=$when
                 continue
             }
 
-            if ($item.type -eq 'response_item' -and $item.payload.type -eq 'custom_tool_call') {
+            if ($item.type -eq 'response_item' -and $item.payload.type -in @('custom_tool_call','function_call')) {
                 $callId = [string]$item.payload.call_id
                 $raw = [string]$item.payload.input
                 $actualEscalation = $raw -match 'sandbox_permissions\\?["'']?\s*:\s*\\?["'']require_escalated'
@@ -355,7 +407,7 @@ function Get-CodexSnapshot {
                 continue
             }
 
-            if ($item.type -eq 'response_item' -and $item.payload.type -eq 'custom_tool_call_output') {
+            if ($item.type -eq 'response_item' -and $item.payload.type -in @('custom_tool_call_output','function_call_output')) {
                 $callId = [string]$item.payload.call_id
                 if ($callId -and $turn.Pending.ContainsKey($callId)) { $turn.Pending.Remove($callId) }
                 if ($callId -and $turn.ActiveTools.ContainsKey($callId)) { $turn.ActiveTools.Remove($callId) }
@@ -394,6 +446,7 @@ function Get-CodexSnapshot {
                 Path=$file.FullName; TurnId=$t.TurnId; Status=$t.Status; Updated=$t.Updated
                 ThreadId=$threadId
                 LastEvent=$t.LastEvent; NeedsReview=[bool]$t.NeedsReview; ReviewReason=$t.ReviewReason
+                IsPlanMode=[bool]$t.IsPlanMode
                 PendingIds=@($t.Pending.Keys); ActiveToolIds=@($t.ActiveTools.Keys)
             }
         }
@@ -409,7 +462,7 @@ function Get-CodexSnapshot {
             $session.Status = 'completed'
             $session.LastEvent = 'log_final_answer'
             $session.Updated = [DateTimeOffset]::FromUnixTimeSeconds([long]$completion.timestamp).LocalDateTime
-            $reason = Get-ReviewReason ([string]$completion.finalText)
+            $reason = Get-ReviewReason ([string]$completion.finalText) ([bool]$session.IsPlanMode)
             $session.NeedsReview = [bool]$reason
             $session.ReviewReason = $reason
             $session.ActiveToolIds = @()
@@ -467,7 +520,7 @@ function Get-CodexSnapshot {
         }
     }
     foreach ($s in $sessionStates) {
-        $diagnostics += [pscustomobject]@{ Path=$s.Path; TurnId=$s.TurnId; LastEvent=$s.LastEvent; Status=$s.Status; NeedsReview=$s.NeedsReview; ReviewReason=$s.ReviewReason; PendingIds=$s.PendingIds; ActiveToolIds=$s.ActiveToolIds; Updated=$s.Updated }
+        $diagnostics += [pscustomobject]@{ Path=$s.Path; TurnId=$s.TurnId; LastEvent=$s.LastEvent; Status=$s.Status; NeedsReview=$s.NeedsReview; ReviewReason=$s.ReviewReason; IsPlanMode=$s.IsPlanMode; PendingIds=$s.PendingIds; ActiveToolIds=$s.ActiveToolIds; Updated=$s.Updated }
     }
     return @{ State=$state; Lamps=$lamps; Detail=$detail; Five=$five; Week=$week; FiveReset=$fiveReset; WeekReset=$weekReset; ResetCount=$script:resetCount; ResetExpires=$script:resetExpires; ResetExpiresList=$script:resetExpiresList; RateUpdated=$(if ($latestRate) {$latestRate.When} else {$null}); NextLampExpiry=$(if ($nextLampExpiry.Count) {$nextLampExpiry[0].Expires} else {$null}); Diagnostics=$diagnostics }
 }
@@ -487,11 +540,41 @@ $script:resetExpiresList = @()
 $script:widgetStartedAt = Get-Date
 $script:observedActiveTurns = @{}
 $script:logProbe = $null
+$script:lastLampSignature = $null
+$script:timer = $null
+$script:idleSince = $null
+$script:lastMemoryCleanup = [datetime]::MinValue
 $script:errorLog = Join-Path $PSScriptRoot 'CodexStatusWidget-errors.log'
 
 function Get-SessionSignature {
     $files = @(Get-RecentSessionFiles)
     return (($files | ForEach-Object { $_.FullName + ':' + $_.Length + ':' + $_.LastWriteTimeUtc.Ticks }) -join '|')
+}
+
+function Invoke-IdleMemoryCleanup([string]$state, [datetime]$now) {
+    if ($state -in @('running','action')) {
+        $script:idleSince = $null
+        return
+    }
+    if ($null -eq $script:idleSince) {
+        $script:idleSince = $now
+        return
+    }
+    if (($now - $script:idleSince).TotalSeconds -lt 30 -or
+        ($now - $script:lastMemoryCleanup).TotalMinutes -lt 10) { return }
+
+    # PowerShell and WPF retain transient scan allocations in the process
+    # working set. Reclaim them only during sustained idle periods so active
+    # status updates never pay the collection/page-in cost.
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+    [GC]::Collect()
+    try {
+        $process = [Diagnostics.Process]::GetCurrentProcess()
+        [void][CodexWidgetMemory]::EmptyWorkingSet($process.Handle)
+        $process.Dispose()
+    } catch {}
+    $script:lastMemoryCleanup = $now
 }
 
 function Update-Widget {
@@ -550,6 +633,13 @@ function Update-Widget {
         $script:lastUsageUpdate = $now
         if ($s.RateUpdated) { $script:lastDisplayedRateUpdate = $s.RateUpdated }
     }
+    if ($script:timer) {
+        $pollSeconds = if ($s.State -in @('running','action')) { 2 } else { 5 }
+        if ($script:timer.Interval.TotalSeconds -ne $pollSeconds) {
+            $script:timer.Interval = [TimeSpan]::FromSeconds($pollSeconds)
+        }
+    }
+    Invoke-IdleMemoryCleanup $s.State $now
 }
 
 function Invoke-SafeWidgetUpdate {
@@ -593,16 +683,13 @@ $workArea = [System.Windows.SystemParameters]::WorkArea
 $window.Left = $workArea.Right - $window.Width - 18
 $window.Top = $workArea.Bottom - $window.Height - 18
 
-$timer = [Windows.Threading.DispatcherTimer]::new()
-$timer.Interval = [TimeSpan]::FromSeconds(2)
-$timer.Add_Tick({ Invoke-SafeWidgetUpdate })
-$window.Add_Loaded({ Invoke-SafeWidgetUpdate; $timer.Start() })
+$script:timer = [Windows.Threading.DispatcherTimer]::new()
+$script:timer.Interval = [TimeSpan]::FromSeconds(2)
+$script:timer.Add_Tick({ Invoke-SafeWidgetUpdate })
+$window.Add_Loaded({ Invoke-SafeWidgetUpdate; $script:timer.Start() })
 $window.Add_Closed({
-    $timer.Stop()
-    if ($script:logProbe) {
-        try { if (!$script:logProbe.HasExited) { $script:logProbe.Kill() } } catch {}
-        try { $script:logProbe.Dispose() } catch {}
-    }
+    $script:timer.Stop()
+    Stop-LogStateProbe
     if ($instanceMutex) {
         try { $instanceMutex.ReleaseMutex() } catch {}
         $instanceMutex.Dispose()
