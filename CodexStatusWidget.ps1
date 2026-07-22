@@ -23,54 +23,56 @@ if (!$Probe) {
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Codex Status" Width="321" Height="50" WindowStyle="None"
+        Title="Codex Status" Width="300" Height="56" WindowStyle="None"
         AllowsTransparency="True" Background="Transparent" Topmost="True"
-        ShowInTaskbar="False" ResizeMode="NoResize">
-  <Border CornerRadius="14" Background="#F2191C23" BorderBrush="#4D667080" BorderThickness="1" Padding="7,6">
+        ShowInTaskbar="False" ResizeMode="NoResize"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        FontFamily="Segoe UI Variable Text">
+  <Border x:Name="Shell" CornerRadius="18" Background="#F01C1C1E" BorderBrush="#38FFFFFF" BorderThickness="1" Padding="8,7">
     <Grid>
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="25"/><ColumnDefinition Width="6"/><ColumnDefinition Width="88"/><ColumnDefinition Width="6"/><ColumnDefinition Width="88"/><ColumnDefinition Width="6"/><ColumnDefinition Width="88"/>
+        <ColumnDefinition Width="28"/><ColumnDefinition Width="8"/><ColumnDefinition Width="78"/><ColumnDefinition Width="7"/><ColumnDefinition Width="78"/><ColumnDefinition Width="7"/><ColumnDefinition Width="78"/>
       </Grid.ColumnDefinitions>
 
       <StackPanel x:Name="LampsPanel" Grid.Column="0" Orientation="Horizontal"
                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
-      <Border Grid.Column="2" CornerRadius="8" Background="#CC232730" BorderBrush="#303E4653" BorderThickness="1" Padding="6,3">
+      <Border Grid.Column="2" CornerRadius="10" Background="#18FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1" Padding="7,4">
         <Grid HorizontalAlignment="Center">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
-          <TextBlock Text="5h" Foreground="#B9C0CB" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
-          <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
-            <TextBlock x:Name="FiveText" Text="--%" Foreground="#F4F6F8" FontSize="11" FontWeight="SemiBold" TextAlignment="Right"/>
-            <TextBlock x:Name="FiveResetText" Text="--:--" Foreground="#AEB6C2" FontSize="10" TextAlignment="Right" Margin="0,-1,0,0"/>
+          <TextBlock Text="5h" Foreground="#A3EBEBF5" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+            <TextBlock x:Name="FiveText" Text="--%" Foreground="#F5FFFFFF" FontSize="11" FontWeight="SemiBold" TextAlignment="Right"/>
+            <TextBlock x:Name="FiveResetText" Text="--:--" Foreground="#8AEBEBF5" FontSize="10" TextAlignment="Right" Margin="0,-1,0,0"/>
           </StackPanel>
         </Grid>
       </Border>
 
-      <Border Grid.Column="4" CornerRadius="8" Background="#CC232730" BorderBrush="#303E4653" BorderThickness="1" Padding="6,3">
+      <Border Grid.Column="4" CornerRadius="10" Background="#18FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1" Padding="7,4">
         <Grid HorizontalAlignment="Center">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
-          <TextBlock Text="&#21608;" Foreground="#B9C0CB" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
-          <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
-            <TextBlock x:Name="WeekText" Text="--%" Foreground="#F4F6F8" FontSize="11" FontWeight="SemiBold" TextAlignment="Right"/>
-            <TextBlock x:Name="WeekResetText" Text="--" Foreground="#AEB6C2" FontSize="10" TextAlignment="Right" Margin="0,-1,0,0"/>
+          <TextBlock Text="&#21608;" Foreground="#A3EBEBF5" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+          <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+            <TextBlock x:Name="WeekText" Text="--%" Foreground="#F5FFFFFF" FontSize="11" FontWeight="SemiBold" TextAlignment="Right"/>
+            <TextBlock x:Name="WeekResetText" Text="--" Foreground="#8AEBEBF5" FontSize="10" TextAlignment="Right" Margin="0,-1,0,0"/>
           </StackPanel>
         </Grid>
       </Border>
 
-      <Border Grid.Column="6" CornerRadius="8" Background="#CC232730" BorderBrush="#303E4653" BorderThickness="1" Padding="6,3">
+      <Border Grid.Column="6" CornerRadius="10" Background="#18FFFFFF" BorderBrush="#20FFFFFF" BorderThickness="1" Padding="7,4">
         <Grid VerticalAlignment="Center" HorizontalAlignment="Center">
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
           </Grid.ColumnDefinitions>
-          <TextBlock x:Name="ResetCountText" Grid.Column="0" Text="--" Foreground="#F4F6F8" FontSize="14" FontWeight="SemiBold"
+          <TextBlock x:Name="ResetCountText" Grid.Column="0" Text="--" Foreground="#F5FFFFFF" FontSize="14" FontWeight="SemiBold"
                      TextAlignment="Center" VerticalAlignment="Center"/>
-          <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0,0,0">
-            <TextBlock x:Name="ResetExpiryText1" Text="--" Foreground="#F4F6F8" FontSize="11" FontWeight="SemiBold" TextAlignment="Right"/>
-            <TextBlock x:Name="ResetExpiryText2" Text="" Foreground="#AEB6C2" FontSize="10" TextAlignment="Right" Margin="0,-1,0,0"/>
+          <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+            <TextBlock x:Name="ResetExpiryText1" Text="--" Foreground="#F5FFFFFF" FontSize="11" FontWeight="SemiBold" TextAlignment="Right"/>
+            <TextBlock x:Name="ResetExpiryText2" Text="" Foreground="#8AEBEBF5" FontSize="10" TextAlignment="Right" Margin="0,-1,0,0"/>
           </StackPanel>
         </Grid>
       </Border>
@@ -102,7 +104,8 @@ function Format-ResetExpiry([object]$value) {
 }
 
 function Set-Lamps([object[]]$states) {
-    $colors = @{ idle='#FFF4D6'; running='#F05252'; action='#4BA3FF'; offline='#77808D' }
+    # Apple system colors stay legible against the dark material surface.
+    $colors = @{ idle='#FFD60A'; running='#FF453A'; action='#0A84FF'; offline='#8E8E93' }
     if (!$states -or $states.Count -eq 0) { $states = @('idle') }
     $signature = @($states | ForEach-Object { [string]$_ }) -join '|'
     if ($signature -eq $script:lastLampSignature) { return }
@@ -112,17 +115,13 @@ function Set-Lamps([object[]]$states) {
     foreach ($state in $states) {
         $color = if ($colors.ContainsKey([string]$state)) { $colors[[string]$state] } else { $colors.offline }
         $holder = [Windows.Controls.Grid]::new()
-        $holder.Width = $dotSize + 1; $holder.Height = $dotSize + 1
+        $holder.Width = $dotSize; $holder.Height = $dotSize
         $holder.Margin = [Windows.Thickness]::new(0,0,0,0)
-        $glow = [Windows.Shapes.Ellipse]::new()
-        $glow.Width = $dotSize + 1; $glow.Height = $dotSize + 1
-        $glow.HorizontalAlignment = 'Center'; $glow.VerticalAlignment = 'Center'
-        $glow.Fill = New-Brush $color; $glow.Opacity = if ($state -eq 'offline') { 0.15 } else { 0.25 }
         $lamp = [Windows.Shapes.Ellipse]::new()
         $lamp.Width = $dotSize; $lamp.Height = $dotSize
         $lamp.HorizontalAlignment = 'Center'; $lamp.VerticalAlignment = 'Center'
-        $lamp.Fill = New-Brush $color; $lamp.Stroke = New-Brush '#BFFFFFFF'; $lamp.StrokeThickness = 0.8
-        [void]$holder.Children.Add($glow); [void]$holder.Children.Add($lamp)
+        $lamp.Fill = New-Brush $color; $lamp.Stroke = New-Brush '#52FFFFFF'; $lamp.StrokeThickness = 0.75
+        [void]$holder.Children.Add($lamp)
         [void]$lampsPanel.Children.Add($holder)
     }
 }
@@ -240,6 +239,36 @@ function ConvertTo-UnixResetTime([object]$value) {
     try { return [DateTimeOffset]::Parse([string]$value).ToUnixTimeSeconds() } catch { return $null }
 }
 
+function ConvertTo-NormalizedRateLimits([object]$limits) {
+    $result = @{}
+    foreach ($sourceSlot in @('primary','secondary')) {
+        $window = if ($limits -is [hashtable]) { $limits[$sourceSlot] } else { $limits.$sourceSlot }
+        if ($null -eq $window) { continue }
+
+        $windowMinutes = $null
+        if ($null -ne $window.window_minutes) {
+            try { $windowMinutes = [double]$window.window_minutes } catch {}
+        } elseif ($null -ne $window.limit_window_seconds) {
+            try { $windowMinutes = [double]$window.limit_window_seconds / 60.0 } catch {}
+        }
+
+        # API field positions are not semantic. When the 5h limit is removed,
+        # the seven-day window moves into primary_window. Classify by duration
+        # so five-hour and weekly values always land in the correct panel.
+        $targetSlot = $sourceSlot
+        if ($null -ne $windowMinutes -and $windowMinutes -gt 0) {
+            $targetSlot = if ($windowMinutes -le 1440) { 'primary' } else { 'secondary' }
+        }
+        $resetValue = if ($null -ne $window.resets_at) { $window.resets_at } else { $window.reset_at }
+        $result[$targetSlot] = @{
+            used_percent = [double]$window.used_percent
+            resets_at = ConvertTo-UnixResetTime $resetValue
+            window_minutes = $windowMinutes
+        }
+    }
+    return $result
+}
+
 function Get-CodexUsageRateLimits {
     $headers = Get-CodexAuthHeaders
     if ($null -eq $headers) { return $null }
@@ -248,20 +277,9 @@ function Get-CodexUsageRateLimits {
             -Headers $headers -Method Get -TimeoutSec 8 -ErrorAction Stop
         if ($null -eq $response.rate_limit) { return $null }
 
-        $result = @{}
-        if ($null -ne $response.rate_limit.primary_window) {
-            $window = $response.rate_limit.primary_window
-            $result.primary = @{
-                used_percent = [double]$window.used_percent
-                resets_at = ConvertTo-UnixResetTime $window.reset_at
-            }
-        }
-        if ($null -ne $response.rate_limit.secondary_window) {
-            $window = $response.rate_limit.secondary_window
-            $result.secondary = @{
-                used_percent = [double]$window.used_percent
-                resets_at = ConvertTo-UnixResetTime $window.reset_at
-            }
+        $result = ConvertTo-NormalizedRateLimits @{
+            primary = $response.rate_limit.primary_window
+            secondary = $response.rate_limit.secondary_window
         }
         if ($result.Count -eq 0) { return $null }
         return $result
@@ -313,7 +331,13 @@ function Get-CodexSnapshot {
         $isTopLevelConversation = $true
         $isPlanMode = $false
         try {
-            $meta = Get-Content -LiteralPath $file.FullName -TotalCount 1 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $metaLine = Get-Content -LiteralPath $file.FullName -TotalCount 1 -ErrorAction Stop
+            # Some Windows rollouts contain a malformed/non-UTF8 cwd string in
+            # session_meta. Recover the thread id from the otherwise readable
+            # raw line so completion can still be matched in logs_2.sqlite.
+            $rawThreadId = [regex]::Match([string]$metaLine, '"(?:id|session_id)"\s*:\s*"([^"]+)"')
+            if ($rawThreadId.Success) { $threadId = $rawThreadId.Groups[1].Value }
+            $meta = $metaLine | ConvertFrom-Json -ErrorAction Stop
             $threadId = [string]$(if ($meta.payload.id) { $meta.payload.id } else { $meta.payload.session_id })
             $hasParentThread = ![string]::IsNullOrWhiteSpace([string]$meta.payload.parent_thread_id)
             $hasSubagentSource = $meta.payload.source -is [pscustomobject] -and $null -ne $meta.payload.source.subagent
@@ -350,7 +374,15 @@ function Get-CodexSnapshot {
             }
 
             if ($item.type -eq 'event_msg' -and $item.payload.type -eq 'token_count' -and $item.payload.rate_limits) {
-                if (!$latestRate -or $when -gt $latestRate.When) { $latestRate = @{ When=$when; Data=$item.payload.rate_limits } }
+                # The authenticated account endpoint is authoritative for the
+                # displayed quota. Local token_count events can be rounded or
+                # stale (for example, reporting both windows as 10% used), so
+                # they must not replace a successfully loaded account value.
+                if (!$latestRate -or $latestRate.Source -ne 'account') {
+                    if (!$latestRate -or $when -gt $latestRate.When) {
+                        $latestRate = @{ When=$when; Data=(ConvertTo-NormalizedRateLimits $item.payload.rate_limits); Source='session' }
+                    }
+                }
             }
 
             $eventTurnId = $null
@@ -423,6 +455,13 @@ function Get-CodexSnapshot {
                 if ($turn.ReviewReason -in @('user_input','file_change','approval')) {
                     $turn.NeedsReview=$false; $turn.ReviewReason=$null
                 }
+                # Current Codex Desktop rollouts can omit the final plan text
+                # and persist only task_complete. A completed Plan-mode turn
+                # with no visible final answer is waiting for the user to
+                # review/approve the plan, so keep it blue instead of idle.
+                if ($turn.IsPlanMode -and [string]::IsNullOrWhiteSpace($turn.FinalText) -and !$turn.NeedsReview) {
+                    $turn.NeedsReview=$true; $turn.ReviewReason='plan_mode_completion'
+                }
                 continue
             }
 
@@ -463,6 +502,9 @@ function Get-CodexSnapshot {
             $session.LastEvent = 'log_final_answer'
             $session.Updated = [DateTimeOffset]::FromUnixTimeSeconds([long]$completion.timestamp).LocalDateTime
             $reason = Get-ReviewReason ([string]$completion.finalText) ([bool]$session.IsPlanMode)
+            if (!$reason -and $session.IsPlanMode -and [string]::IsNullOrWhiteSpace([string]$completion.finalText)) {
+                $reason = 'plan_mode_completion'
+            }
             $session.NeedsReview = [bool]$reason
             $session.ReviewReason = $reason
             $session.ActiveToolIds = @()
@@ -522,7 +564,7 @@ function Get-CodexSnapshot {
     foreach ($s in $sessionStates) {
         $diagnostics += [pscustomobject]@{ Path=$s.Path; TurnId=$s.TurnId; LastEvent=$s.LastEvent; Status=$s.Status; NeedsReview=$s.NeedsReview; ReviewReason=$s.ReviewReason; IsPlanMode=$s.IsPlanMode; PendingIds=$s.PendingIds; ActiveToolIds=$s.ActiveToolIds; Updated=$s.Updated }
     }
-    return @{ State=$state; Lamps=$lamps; Detail=$detail; Five=$five; Week=$week; FiveReset=$fiveReset; WeekReset=$weekReset; ResetCount=$script:resetCount; ResetExpires=$script:resetExpires; ResetExpiresList=$script:resetExpiresList; RateUpdated=$(if ($latestRate) {$latestRate.When} else {$null}); NextLampExpiry=$(if ($nextLampExpiry.Count) {$nextLampExpiry[0].Expires} else {$null}); Diagnostics=$diagnostics }
+    return @{ State=$state; Lamps=$lamps; Detail=$detail; Five=$five; Week=$week; FiveReset=$fiveReset; WeekReset=$weekReset; HasFiveLimit=[bool]($latestRate -and $latestRate.Data.primary); HasWeekLimit=[bool]($latestRate -and $latestRate.Data.secondary); ResetCount=$script:resetCount; ResetExpires=$script:resetExpires; ResetExpiresList=$script:resetExpiresList; RateUpdated=$(if ($latestRate) {$latestRate.When} else {$null}); NextLampExpiry=$(if ($nextLampExpiry.Count) {$nextLampExpiry[0].Expires} else {$null}); Diagnostics=$diagnostics }
 }
 
 $script:lastUsageUpdate = [datetime]::MinValue
@@ -586,7 +628,7 @@ function Update-Widget {
         $accountRate = Get-CodexUsageRateLimits
         $script:lastAccountUsageRefresh = $now
         if ($null -ne $accountRate) {
-            $script:liveRate = @{ When=$now; Data=$accountRate }
+            $script:liveRate = @{ When=$now; Data=$accountRate; Source='account' }
             $script:statusDirty = $true
         }
     }
@@ -619,15 +661,29 @@ function Update-Widget {
     $usageSeconds = if ($s.State -in @('running','action')) { 10 } else { 300 }
     $newRateEvent = $s.RateUpdated -and $s.RateUpdated -gt $script:lastDisplayedRateUpdate
     $refreshUsage = ($now - $script:lastUsageUpdate).TotalSeconds -ge $usageSeconds -or $fiveText.Text -eq '--%' -or $newRateEvent
-    if ($refreshUsage -and $null -ne $s.Five) {
-        $fiveText.Text=('{0:0}%' -f $s.Five)
-        $fiveResetText.Text = if ($s.FiveReset) { $s.FiveReset.ToString('HH:mm') } else { '--:--' }
-    }
-    if ($refreshUsage -and $null -ne $s.Week) {
-        $weekText.Text=('{0:0}%' -f $s.Week)
-        if ($s.WeekReset) {
-            $weekResetText.Text = $s.WeekReset.Month.ToString() + [char]0x6708 + $s.WeekReset.Day.ToString() + [char]0x65E5
-        } else { $weekResetText.Text = '--' }
+    if ($refreshUsage) {
+        if ($s.HasFiveLimit -and $null -ne $s.Five) {
+            $fiveText.FontSize = 11
+            $fiveText.Text=('{0:0}%' -f $s.Five)
+            $fiveResetText.Text = if ($s.FiveReset) { $s.FiveReset.ToString('HH:mm') } else { '--:--' }
+        } elseif ($s.RateUpdated) {
+            # The infinity glyph has a smaller visual body than digits at the
+            # same em size, so use an optical size that matches the quota text.
+            $fiveText.FontSize = 14
+            $fiveText.Text = [string][char]0x221E
+            $fiveResetText.Text = '--:--'
+        }
+        if ($s.HasWeekLimit -and $null -ne $s.Week) {
+            $weekText.FontSize = 11
+            $weekText.Text=('{0:0}%' -f $s.Week)
+            if ($s.WeekReset) {
+                $weekResetText.Text = $s.WeekReset.Month.ToString() + [char]0x6708 + $s.WeekReset.Day.ToString() + [char]0x65E5
+            } else { $weekResetText.Text = '--' }
+        } elseif ($s.RateUpdated) {
+            $weekText.FontSize = 14
+            $weekText.Text = [string][char]0x221E
+            $weekResetText.Text = '--'
+        }
     }
     if ($refreshUsage) {
         $script:lastUsageUpdate = $now
@@ -660,7 +716,7 @@ if ($Probe) {
     if (!$SessionsRoot) {
         $accountRate = Get-CodexUsageRateLimits
         if ($null -ne $accountRate) {
-            $script:liveRate = @{ When=(Get-Date); Data=$accountRate }
+            $script:liveRate = @{ When=(Get-Date); Data=$accountRate; Source='account' }
         }
         $resetCredits = Get-RateLimitResetCredits
         if ($null -ne $resetCredits) {

@@ -114,6 +114,14 @@ try {
     Assert-State 'action' 'plan mode function input request'
 
     Remove-Item (Join-Path $root '*.jsonl')
+    $t2f='turn-plan-complete-without-final'
+    Write-EventFile '02f-plan-complete-without-final' @(
+        (Event (Ts 18) 'turn_context' ([ordered]@{turn_id=$t2f;collaboration_mode=[ordered]@{mode='plan'}})),
+        (Event (Ts 19) 'event_msg' ([ordered]@{type='task_complete';turn_id=$t2f}))
+    ) | Out-Null
+    Assert-State 'action' 'plan mode completion without persisted final waits for user'
+
+    Remove-Item (Join-Path $root '*.jsonl')
     $t3='turn-running'
     Write-EventFile '03-running' @(
         (Event (Ts 20) 'turn_context' ([ordered]@{turn_id=$t3})),
@@ -253,6 +261,22 @@ try {
     $newRate = Probe-State
     if ($newRate.Five -ne 100 -or $null -eq $newRate.FiveReset) { throw 'new quota window must retain its new reset time' }
     Write-Host 'PASS new 100% quota window uses new reset time'
+
+    Remove-Item (Join-Path $root '*.jsonl')
+    $weekOnlyReset=[DateTimeOffset]::UtcNow.AddDays(6).ToUnixTimeSeconds()
+    Write-EventFile '16-week-only-window' @(
+        (Event ([datetime]::UtcNow.ToString('o')) 'event_msg' ([ordered]@{
+            type='token_count'; rate_limits=[ordered]@{
+                primary=[ordered]@{used_percent=19;window_minutes=10080;resets_at=$weekOnlyReset}
+                secondary=$null
+            }
+        }))
+    ) | Out-Null
+    $weekOnlyRate = Probe-State
+    if ($weekOnlyRate.HasFiveLimit -or !$weekOnlyRate.HasWeekLimit -or $null -ne $weekOnlyRate.Five -or $weekOnlyRate.Week -ne 81 -or $null -eq $weekOnlyRate.WeekReset) {
+        throw 'a seven-day primary window must be displayed as weekly with no five-hour limit'
+    }
+    Write-Host 'PASS week-only primary window is classified by duration'
 
     Write-Host 'All state-machine tests passed.'
 } finally {
