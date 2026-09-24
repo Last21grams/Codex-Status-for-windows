@@ -57,6 +57,15 @@ try {
     ) | Out-Null
     Assert-State 'idle' 'normal completion'
 
+    # Reopening an old tab appends settings after the completed turn.
+    Write-EventFile '01-normal' @(
+        (Event (Ts -86400) 'turn_context' ([ordered]@{turn_id=$t1})),
+        (Event (Ts -86399) 'event_msg' ([ordered]@{type='task_started';turn_id=$t1})),
+        (Event (Ts -86398) 'event_msg' ([ordered]@{type='task_complete';turn_id=$t1})),
+        (Event (Ts 0) 'event_msg' ([ordered]@{type='thread_settings_applied';thread_settings=[ordered]@{collaboration_mode=[ordered]@{mode='default'}}}))
+    ) | Out-Null
+    Assert-State 'idle' 'old completed tab settings do not reactivate lamp'
+
     Remove-Item (Join-Path $root '*.jsonl')
     $t2='turn-plan'
     Write-EventFile '02-plan' @(

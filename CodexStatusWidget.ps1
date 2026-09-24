@@ -1,5 +1,15 @@
 param([switch]$Probe, [string]$SessionsRoot)
 
+$ErrorActionPreference = 'Stop'
+$script:errorLog = Join-Path $PSScriptRoot 'CodexStatusWidget-errors.log'
+trap {
+    try { Add-Content -LiteralPath $script:errorLog -Value ((Get-Date).ToString('s') + ' ' + $_.Exception.ToString()) -Encoding UTF8 } catch {}
+    exit 1
+}
+# Also support direct PowerShell 7 launches from a reduced environment.
+if (!$env:SystemRoot) { $env:SystemRoot = [Environment]::GetFolderPath('Windows') }
+if (!$env:windir) { $env:windir = $env:SystemRoot }
+
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
 Add-Type -TypeDefinition @'
 using System;
@@ -8,16 +18,48 @@ using System.Runtime.InteropServices;
 public static class CodexWidgetMemory {
     [DllImport("psapi.dll")]
     public static extern bool EmptyWorkingSet(IntPtr process);
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    public static extern IntPtr FindWindow(string className, string title);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr window, int command);
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr window, out RECT rect);
+    [DllImport("user32.dll")]
+    public static extern bool SystemParametersInfo(uint action, uint param, out RECT rect, uint flags);
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    public static void RestoreExisting() {
+        IntPtr window = FindWindow(null, "Codex Status");
+        if (window == IntPtr.Zero) return;
+        RECT area, rect;
+        ShowWindowAsync(window, 9);
+        if (SystemParametersInfo(0x30, 0, out area, 0) && GetWindowRect(window, out rect)) {
+            SetWindowPos(window, new IntPtr(-1),
+                Math.Max(area.Left, area.Right - (rect.Right - rect.Left) - 18),
+                Math.Max(area.Top, area.Bottom - (rect.Bottom - rect.Top) - 18),
+                0, 0, 0x4000 | 0x0040 | 0x0001);
+        }
+    }
 }
 '@
 
 # Keep exactly one widget instance. This also prevents an old shortcut launch
 # from leaving several differently-colored widgets stacked on the desktop.
 $instanceMutex = $null
+$wakeEvent = $null
 if (!$Probe) {
+    $wakeEvent = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::AutoReset, 'Local\CodexStatusWidget_Wake_9C9A89F2')
     $createdNew = $false
     $instanceMutex = [Threading.Mutex]::new($true, 'Local\CodexStatusWidget_9C9A89F2', [ref]$createdNew)
-    if (!$createdNew) { exit 0 }
+    if (!$createdNew) {
+        [CodexWidgetMemory]::RestoreExisting()
+        [void]$wakeEvent.Set()
+        $wakeEvent.Dispose()
+        $instanceMutex.Dispose()
+        exit 0
+    }
 }
 
 $xaml = @'
@@ -105,7 +147,7 @@ function Format-ResetExpiry([object]$value) {
 
 function Set-Lamps([object[]]$states) {
     # Apple system colors stay legible against the dark material surface.
-    $colors = @{ idle='#FFD60A'; running='#FF453A'; action='#0A84FF'; offline='#8E8E93' }
+    $colors = @{ idle='#FFF8E7'; running='#FF453A'; action='#0A84FF'; offline='#8E8E93' }
     if (!$states -or $states.Count -eq 0) { $states = @('idle') }
     $signature = @($states | ForEach-Object { [string]$_ }) -join '|'
     if ($signature -eq $script:lastLampSignature) { return }
@@ -204,7 +246,13 @@ function Get-LogCompletionMap([object[]]$sessions) {
         $request = @{ turns=$turns } | ConvertTo-Json -Depth 4 -Compress
         $script:logProbe.StandardInput.WriteLine($request)
         $script:logProbe.StandardInput.Flush()
-        $line = $script:logProbe.StandardOutput.ReadLine()
+        # A growing/locked database or a stalled helper must not freeze WPF.
+        $read = $script:logProbe.StandardOutput.ReadLineAsync()
+        if (!$read.Wait(750)) {
+            Stop-LogStateProbe
+            return $result
+        }
+        $line = $read.Result
         if ([string]::IsNullOrWhiteSpace($line)) { return $result }
         $response = $line | ConvertFrom-Json -ErrorAction Stop
         foreach ($property in $response.results.PSObject.Properties) {
@@ -373,6 +421,10 @@ function Get-CodexSnapshot {
                 $isPlanMode = ([string]$item.payload.collaboration_mode.mode -eq 'plan')
             }
 
+            # Settings can be appended to an old rollout when its tab is opened.
+            # They do not start or resume a turn and must not refresh its age.
+            if ($item.type -eq 'event_msg' -and $item.payload.type -eq 'thread_settings_applied') { continue }
+
             if ($item.type -eq 'event_msg' -and $item.payload.type -eq 'token_count' -and $item.payload.rate_limits) {
                 # The authenticated account endpoint is authoritative for the
                 # displayed quota. Local token_count events can be rounded or
@@ -527,7 +579,8 @@ function Get-CodexSnapshot {
             $activeKey = $current.Path + '|' + $current.TurnId
             $wasObservedActive = $script:observedActiveTurns.ContainsKey($activeKey)
             $startedRecently = $current.Updated -ge $script:widgetStartedAt.AddMinutes(-5)
-            if ($wasObservedActive -or $startedRecently -or $current.ActiveToolIds.Count -gt 0) {
+            $hasRecentActivity = $current.Updated -ge $now.AddMinutes(-30)
+            if ($hasRecentActivity -and ($wasObservedActive -or $startedRecently -or $current.ActiveToolIds.Count -gt 0)) {
                 $script:observedActiveTurns[$activeKey] = $true
                 $lampEntries += [pscustomobject]@{ State='running'; Updated=$current.Updated; Expires=$null }
             }
@@ -586,7 +639,14 @@ $script:lastLampSignature = $null
 $script:timer = $null
 $script:idleSince = $null
 $script:lastMemoryCleanup = [datetime]::MinValue
+$script:quotaBurstUntil = [datetime]::MinValue
+$script:lastQuotaSignature = $null
 $script:errorLog = Join-Path $PSScriptRoot 'CodexStatusWidget-errors.log'
+
+function Get-QuotaSignature([object]$rateData) {
+    if ($null -eq $rateData) { return $null }
+    return ($rateData | ConvertTo-Json -Depth 8 -Compress)
+}
 
 function Get-SessionSignature {
     $files = @(Get-RecentSessionFiles)
@@ -624,10 +684,21 @@ function Update-Widget {
     # Session logs only receive fresh quota events while Codex is active. Poll
     # the account endpoint every five minutes as a quiet-time source so the
     # displayed usage and reset times also advance while all chats are idle.
-    if (($now - $script:lastAccountUsageRefresh).TotalSeconds -ge 300) {
+    $quotaBurstActive = $now -lt $script:quotaBurstUntil
+    $activeConversation = $script:cachedSnapshot -and $script:cachedSnapshot.State -in @('running','action')
+    # An active conversation can change quota without the account endpoint
+    # being polled first, so use the fast cadence while it is running. Once
+    # quota changes, keep that cadence for the full ten-minute burst window.
+    $accountUsageRefreshSeconds = if ($quotaBurstActive -or $activeConversation) { 3 } else { 300 }
+    if (($now - $script:lastAccountUsageRefresh).TotalSeconds -ge $accountUsageRefreshSeconds) {
         $accountRate = Get-CodexUsageRateLimits
         $script:lastAccountUsageRefresh = $now
         if ($null -ne $accountRate) {
+            $accountSignature = Get-QuotaSignature $accountRate
+            if ($null -ne $script:lastQuotaSignature -and $accountSignature -ne $script:lastQuotaSignature) {
+                $script:quotaBurstUntil = $now.AddMinutes(10)
+            }
+            $script:lastQuotaSignature = $accountSignature
             $script:liveRate = @{ When=$now; Data=$accountRate; Source='account' }
             $script:statusDirty = $true
         }
@@ -658,7 +729,15 @@ function Update-Widget {
         }
         $script:lastResetRefresh = $now
     }
-    $usageSeconds = if ($s.State -in @('running','action')) { 10 } else { 300 }
+    $currentQuotaSignature = if ($s.RateUpdated) { Get-QuotaSignature $script:liveRate.Data } else { $null }
+    if ($null -ne $currentQuotaSignature -and $null -eq $script:lastQuotaSignature) {
+        $script:lastQuotaSignature = $currentQuotaSignature
+    } elseif ($null -ne $currentQuotaSignature -and $currentQuotaSignature -ne $script:lastQuotaSignature) {
+        $script:lastQuotaSignature = $currentQuotaSignature
+        $script:quotaBurstUntil = $now.AddMinutes(10)
+    }
+    $quotaBurstActive = $now -lt $script:quotaBurstUntil
+    $usageSeconds = if ($quotaBurstActive) { 3 } elseif ($s.State -in @('running','action')) { 10 } else { 300 }
     $newRateEvent = $s.RateUpdated -and $s.RateUpdated -gt $script:lastDisplayedRateUpdate
     $refreshUsage = ($now - $script:lastUsageUpdate).TotalSeconds -ge $usageSeconds -or $fiveText.Text -eq '--%' -or $newRateEvent
     if ($refreshUsage) {
@@ -690,7 +769,7 @@ function Update-Widget {
         if ($s.RateUpdated) { $script:lastDisplayedRateUpdate = $s.RateUpdated }
     }
     if ($script:timer) {
-        $pollSeconds = if ($s.State -in @('running','action')) { 2 } else { 5 }
+        $pollSeconds = if ($now -lt $script:quotaBurstUntil) { 3 } elseif ($s.State -in @('running','action')) { 2 } else { 5 }
         if ($script:timer.Interval.TotalSeconds -ne $pollSeconds) {
             $script:timer.Interval = [TimeSpan]::FromSeconds($pollSeconds)
         }
@@ -735,16 +814,35 @@ $window.Add_MouseLeftButtonDown({
 })
 $window.Add_MouseRightButtonUp({ $window.Topmost = !$window.Topmost })
 
+function Restore-WidgetWindow {
+    $workArea = [System.Windows.SystemParameters]::WorkArea
+    $window.WindowState = 'Normal'
+    $window.Left = [Math]::Max($workArea.Left, $workArea.Right - $window.Width - 18)
+    $window.Top = [Math]::Max($workArea.Top, $workArea.Bottom - $window.Height - 18)
+    $window.Show()
+    $window.Topmost = $false
+    $window.Topmost = $true
+    [void]$window.Activate()
+}
+
 $workArea = [System.Windows.SystemParameters]::WorkArea
 $window.Left = $workArea.Right - $window.Width - 18
 $window.Top = $workArea.Bottom - $window.Height - 18
 
+$wakeTimer = [Windows.Threading.DispatcherTimer]::new()
+$wakeTimer.Interval = [TimeSpan]::FromMilliseconds(250)
+$wakeTimer.Add_Tick({
+    if ($wakeEvent.WaitOne(0)) { Restore-WidgetWindow }
+})
+
 $script:timer = [Windows.Threading.DispatcherTimer]::new()
 $script:timer.Interval = [TimeSpan]::FromSeconds(2)
 $script:timer.Add_Tick({ Invoke-SafeWidgetUpdate })
-$window.Add_Loaded({ Invoke-SafeWidgetUpdate; $script:timer.Start() })
+$window.Add_Loaded({ Set-Lamps @('offline'); $script:timer.Start(); $wakeTimer.Start() })
 $window.Add_Closed({
     $script:timer.Stop()
+    $wakeTimer.Stop()
+    $wakeEvent.Dispose()
     Stop-LogStateProbe
     if ($instanceMutex) {
         try { $instanceMutex.ReleaseMutex() } catch {}
