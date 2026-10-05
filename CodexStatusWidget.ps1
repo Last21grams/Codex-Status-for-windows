@@ -171,8 +171,27 @@ function Set-Lamps([object[]]$states) {
 function Get-RecentSessionFiles {
     $root = if ($SessionsRoot) { $SessionsRoot } else { Join-Path $env:USERPROFILE '.codex\sessions' }
     if (!(Test-Path $root)) { return @() }
-    return @(Get-ChildItem $root -Recurse -File -Filter '*.jsonl' -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime -Descending | Select-Object -First 12)
+    # Filter before taking the recent conversations: a burst of subagent
+    # rollouts must not push their working parent out of the scan.
+    if (!$script:sessionKindCache) { $script:sessionKindCache = @{} }
+    $selected = @()
+    $recentCutoff = (Get-Date).AddHours(-24)
+    foreach ($file in @(Get-ChildItem $root -Recurse -File -Filter '*.jsonl' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+        if ($selected.Count -ge 12 -and $file.LastWriteTime -lt $recentCutoff) { break }
+        if (!$script:sessionKindCache.ContainsKey($file.FullName)) {
+            try {
+                $meta = Get-Content -LiteralPath $file.FullName -Encoding UTF8 -TotalCount 1 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                $isChild = $meta.type -eq 'session_meta' -and (
+                    $meta.payload.thread_source -eq 'subagent' -or
+                    ![string]::IsNullOrWhiteSpace([string]$meta.payload.parent_thread_id) -or
+                    ($meta.payload.source -is [pscustomobject] -and $null -ne $meta.payload.source.subagent))
+                $script:sessionKindCache[$file.FullName] = [bool]$isChild
+            } catch { continue }
+        }
+        if ($script:sessionKindCache[$file.FullName]) { continue }
+        $selected += $file
+    }
+    return $selected
 }
 
 function Get-ReviewReason([string]$text, [bool]$isPlanMode = $false) {
@@ -235,7 +254,7 @@ function Stop-LogStateProbe {
 
 function Get-LogCompletionMap([object[]]$sessions) {
     $result = @{}
-    $turns = @($sessions | Where-Object { ($_.Status -eq 'running' -or $_.IsPlanMode) -and $_.ThreadId -and $_.TurnId } |
+    $turns = @($sessions | Where-Object { ($_.Status -eq 'running' -or $_.IsPlanMode) -and $_.ThreadId -and $_.TurnId -and $_.ActiveToolIds.Count -eq 0 -and $_.PendingIds.Count -eq 0 } |
         ForEach-Object { @{ threadId=$_.ThreadId; turnId=$_.TurnId } })
     if ($turns.Count -eq 0) {
         Stop-LogStateProbe
@@ -261,6 +280,21 @@ function Get-LogCompletionMap([object[]]$sessions) {
     } catch {
         Stop-LogStateProbe
     }
+    return $result
+}
+
+function Get-SessionEventMap([object[]]$files) {
+    $result = @{}
+    if ($files.Count -eq 0 -or !(Start-LogStateProbe)) { return $result }
+    try {
+        $request = @{ sessionPaths=@($files | ForEach-Object { $_.FullName }) } | ConvertTo-Json -Compress
+        $script:logProbe.StandardInput.WriteLine($request)
+        $script:logProbe.StandardInput.Flush()
+        $read = $script:logProbe.StandardOutput.ReadLineAsync()
+        if (!$read.Wait(1500)) { Stop-LogStateProbe; return $result }
+        $response = $read.Result | ConvertFrom-Json -ErrorAction Stop
+        foreach ($property in $response.sessions.PSObject.Properties) { $result[$property.Name] = $property.Value }
+    } catch { Stop-LogStateProbe }
     return $result
 }
 
@@ -367,6 +401,7 @@ function Get-RateLimitResetCredits {
 function Get-CodexSnapshot {
     $files = @(Get-RecentSessionFiles)
     $noSessionFiles = $files.Count -eq 0
+    $sessionEvents = Get-SessionEventMap $files
 
     $latestRate = $script:liveRate
     $diagnostics = @()
@@ -379,7 +414,7 @@ function Get-CodexSnapshot {
         $isTopLevelConversation = $true
         $isPlanMode = $false
         try {
-            $metaLine = Get-Content -LiteralPath $file.FullName -TotalCount 1 -ErrorAction Stop
+            $metaLine = Get-Content -LiteralPath $file.FullName -Encoding UTF8 -TotalCount 1 -ErrorAction Stop
             # Some Windows rollouts contain a malformed/non-UTF8 cwd string in
             # session_meta. Recover the thread id from the otherwise readable
             # raw line so completion can still be matched in logs_2.sqlite.
@@ -395,8 +430,13 @@ function Get-CodexSnapshot {
             }
         } catch {}
         try {
-            foreach ($headLine in @(Get-Content -LiteralPath $file.FullName -TotalCount 80 -ErrorAction Stop)) {
-                try { $headItem = $headLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+            $headItems = if ($sessionEvents.ContainsKey($file.FullName)) { @($sessionEvents[$file.FullName].settings) } else {
+                foreach ($headLine in @(Get-Content -LiteralPath $file.FullName -Encoding UTF8 -TotalCount 80 -ErrorAction Stop)) {
+                    if ($headLine -notmatch '"type"\s*:\s*"(turn_context|thread_settings_applied)"') { continue }
+                    try { $headLine | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+                }
+            }
+            foreach ($headItem in $headItems) {
                 if ($headItem.type -eq 'event_msg' -and $headItem.payload.type -eq 'thread_settings_applied' -and $headItem.payload.thread_settings.collaboration_mode.mode) {
                     $isPlanMode = ([string]$headItem.payload.thread_settings.collaboration_mode.mode -eq 'plan')
                 }
@@ -408,10 +448,13 @@ function Get-CodexSnapshot {
         # Recent structured events are sufficient to reconstruct the latest
         # turn. Keeping a smaller tail substantially reduces transient string
         # allocations when several long conversations exist.
-        $lines = @(Get-Content -LiteralPath $file.FullName -Tail 600 -ErrorAction SilentlyContinue)
+        $items = if ($sessionEvents.ContainsKey($file.FullName)) { @($sessionEvents[$file.FullName].events) } else {
+            foreach ($line in @(Get-Content -LiteralPath $file.FullName -Encoding UTF8 -Tail 600 -ErrorAction SilentlyContinue)) {
+                try { $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+            }
+        }
 
-        foreach ($line in $lines) {
-            try { $item = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        foreach ($item in $items) {
             try { $when = [datetime]::Parse($item.timestamp).ToLocalTime() } catch { $when = $file.LastWriteTime }
 
             if ($item.type -eq 'event_msg' -and $item.payload.type -eq 'thread_settings_applied' -and $item.payload.thread_settings.collaboration_mode.mode) {
@@ -471,7 +514,8 @@ function Get-CodexSnapshot {
                 $text = (($item.payload.content | ForEach-Object { [string]$_.text }) -join '')
                 $turn.FinalText = $text
                 $reason = Get-ReviewReason $text ([bool]$turn.IsPlanMode)
-                if ($reason) { $turn.NeedsReview=$true; $turn.ReviewReason=$reason }
+                $turn.Status='completed'; $turn.Pending.Clear(); $turn.ActiveTools.Clear()
+                $turn.NeedsReview=[bool]$reason; $turn.ReviewReason=$reason
                 $turn.LastEvent='final_answer'; $turn.Updated=$when
                 continue
             }

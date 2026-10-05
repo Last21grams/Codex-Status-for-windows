@@ -7,7 +7,9 @@ function Ts([int]$seconds) { return $now.AddSeconds($seconds).ToString('o') }
 
 function Write-EventFile([string]$name, [object[]]$events) {
     $path = Join-Path $root ($name + '.jsonl')
-    $events | ForEach-Object { $_ | ConvertTo-Json -Depth 12 -Compress } | Set-Content -LiteralPath $path -Encoding UTF8
+    # Codex writes UTF-8 without a BOM; Windows PowerShell must not infer ANSI.
+    $lines = @($events | ForEach-Object { $_ | ConvertTo-Json -Depth 12 -Compress })
+    [IO.File]::WriteAllLines($path, [string[]]$lines, [Text.UTF8Encoding]::new($false))
     return $path
 }
 
@@ -56,6 +58,28 @@ try {
         (Event (Ts 3) 'event_msg' ([ordered]@{type='task_complete';turn_id=$t1}))
     ) | Out-Null
     Assert-State 'idle' 'normal completion'
+
+    Remove-Item (Join-Path $root '*.jsonl')
+    Write-EventFile '01-final-only' @(
+        (Event (Ts -10) 'turn_context' ([ordered]@{turn_id='final-only'})),
+        (Message 'final-only' 'assistant' 'final_answer' 'Completed.' (Ts -8))
+    ) | Out-Null
+    Assert-State 'idle' 'final answer completes turn without task_complete'
+    Remove-Item (Join-Path $root '*.jsonl')
+    Write-EventFile '01-commentary' @(
+        (Event (Ts 0) 'turn_context' ([ordered]@{turn_id='commentary'})),
+        (Message 'commentary' 'assistant' 'commentary' 'Still working.' (Ts 1))
+    ) | Out-Null
+    Assert-State 'running' 'commentary does not complete turn'
+    Remove-Item (Join-Path $root '*.jsonl')
+    $confirmText = ([string][char]0x8BF7) + [char]0x786E + [char]0x8BA4
+    Write-EventFile '01-utf8-review' @(
+        (Event (Ts 0) 'turn_context' ([ordered]@{turn_id='utf8-review'})),
+        (Message 'utf8-review' 'assistant' 'final_answer' $confirmText (Ts 1)),
+        (Event (Ts 2) 'event_msg' ([ordered]@{type='task_complete';turn_id='utf8-review'}))
+    ) | Out-Null
+    Assert-State 'action' 'UTF8 without BOM preserves Chinese review request'
+    Remove-Item (Join-Path $root '*.jsonl')
 
     # Reopening an old tab appends settings after the completed turn.
     Write-EventFile '01-normal' @(
@@ -223,6 +247,24 @@ try {
         (Event ([datetime]::UtcNow.ToString('o')) 'event_msg' ([ordered]@{type='task_complete';turn_id='guardian-turn'}))
     ) | Out-Null
     Assert-Lamps @('running') 'guardian completion does not add a white lamp'
+
+    # More than twelve child rollouts must not evict the older parent.
+    foreach ($childIndex in 1..15) {
+        Write-EventFile ('10e-child-' + $childIndex) @(
+            (SessionMeta 'subagent' 'user-running' ([datetime]::UtcNow.ToString('o'))),
+            (Event ([datetime]::UtcNow.ToString('o')) 'event_msg' ([ordered]@{type='task_started';turn_id=('child-' + $childIndex)}))
+        ) | Out-Null
+    }
+    Assert-Lamps @('running') 'subagent burst does not evict parent lamp'
+
+    Remove-Item (Join-Path $root '*.jsonl')
+    foreach ($parentIndex in 1..15) {
+        Write-EventFile ('10f-parent-' + $parentIndex) @(
+            (SessionMeta 'user' $null ([datetime]::UtcNow.ToString('o'))),
+            (Event ([datetime]::UtcNow.ToString('o')) 'event_msg' ([ordered]@{type='task_started';turn_id=('parent-' + $parentIndex)}))
+        ) | Out-Null
+    }
+    Assert-Lamps @((1..15) | ForEach-Object { 'running' }) 'more than twelve active parents each have a lamp'
 
     Remove-Item (Join-Path $root '*.jsonl')
     Write-EventFile '11-parallel-running' @(
